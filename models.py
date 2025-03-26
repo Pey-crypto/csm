@@ -147,6 +147,8 @@ class Model(
         Returns:
             (batch_size, audio_num_codebooks) sampled tokens
         """
+        if self.decoder.caches_are_enabled():
+            self.decoder._first_frame = True
         dtype = next(self.parameters()).dtype
         b, s, _ = tokens.size()
 

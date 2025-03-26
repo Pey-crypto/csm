@@ -1,5 +1,6 @@
-torch==2.4.0
-torchaudio==2.4.0
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.4.0+cu124
+torchaudio==2.4.0+cu124
 tokenizers==0.21.0
 transformers==4.49.0
 huggingface_hub==0.28.1
