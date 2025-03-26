@@ -65,12 +65,15 @@ def _index_causal_mask(mask: torch.Tensor, input_pos: torch.Tensor):
     Returns:
         (batch_size, seq_len, max_seq_len)
     """
+    if mask.device != input_pos.device:
+        mask = mask.to(input_pos.device)
+
     r = mask[input_pos, :]
     return r
 
 
 def _multinomial_sample_one_no_sync(probs):  # Does multinomial sampling without a cuda synchronization
-    q = torch.empty_like(probs).exponential_(1)
+    q = torch.empty_like(probs, device=probs.device).exponential_(1)
     return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
 
 

@@ -15,7 +15,7 @@ from watermarking import CSM_1B_GH_WATERMARK, load_watermarker, watermark
 class Segment:
     speaker: int
     text: str
-    # (num_samples,), sample_rate = 24_000
+    #(num_samples,), sample_rate = 24_000
     audio: torch.Tensor
 
 
@@ -62,29 +62,29 @@ class Generator:
         frame_masks = []
 
         text_tokens = self._text_tokenizer.encode(f"[{speaker}]{text}")
-        text_frame = torch.zeros(len(text_tokens), 33).long()
-        text_frame_mask = torch.zeros(len(text_tokens), 33).bool()
-        text_frame[:, -1] = torch.tensor(text_tokens)
+        text_frame = torch.zeros(len(text_tokens), 33, device=self.device, dtype=torch.long)
+        text_frame_mask = torch.zeros(len(text_tokens), 33, device=self.device, dtype=torch.bool)
+        text_frame[:, -1] = torch.tensor(text_tokens, device=self.device)
         text_frame_mask[:, -1] = True
 
-        frame_tokens.append(text_frame.to(self.device))
-        frame_masks.append(text_frame_mask.to(self.device))
+        frame_tokens.append(text_frame)
+        frame_masks.append(text_frame_mask)
 
         return torch.cat(frame_tokens, dim=0), torch.cat(frame_masks, dim=0)
 
     def _tokenize_audio(self, audio: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         frame_tokens = []
         frame_masks = []
-
+        if audio.device != self.device:
+            audio = audio.to(self.device)
         # (K, T)
-        audio = audio.to(self.device)
         audio_tokens = self._audio_tokenizer.encode(audio.unsqueeze(0).unsqueeze(0))[0]
         # add EOS frame
-        eos_frame = torch.zeros(audio_tokens.size(0), 1).to(self.device)
+        eos_frame = torch.zeros(audio_tokens.size(0), 1,device=self.device)
         audio_tokens = torch.cat([audio_tokens, eos_frame], dim=1)
 
-        audio_frame = torch.zeros(audio_tokens.size(1), 33).long().to(self.device)
-        audio_frame_mask = torch.zeros(audio_tokens.size(1), 33).bool().to(self.device)
+        audio_frame = torch.zeros(audio_tokens.size(1), 33, device=self.device, dtype=torch.long)
+        audio_frame_mask = torch.zeros(audio_tokens.size(1), 33, device=self.device, dtype=torch.bool)
         audio_frame[:, :-1] = audio_tokens.transpose(0, 1)
         audio_frame_mask[:, :-1] = True
 
@@ -118,21 +118,28 @@ class Generator:
         max_generation_len = int(max_audio_length_ms / 80)
         tokens, tokens_mask = [], []
         for segment in context:
-            segment_tokens, segment_tokens_mask = self._tokenize_segment(segment)
+            if segment.audio.device != self.device:
+                segment_audio = segment.audio.to(self.device)
+
+            else:
+                segment_audio = segment.audio
+            segment_tokens, segment_tokens_mask = self._tokenize_segment(
+                Segment(speaker=segment.speaker, text=segment.text, audio=segment_audio)
+            )
             tokens.append(segment_tokens)
             tokens_mask.append(segment_tokens_mask)
-
+        print(self.device)
         gen_segment_tokens, gen_segment_tokens_mask = self._tokenize_text_segment(text, speaker)
         tokens.append(gen_segment_tokens)
         tokens_mask.append(gen_segment_tokens_mask)
 
-        prompt_tokens = torch.cat(tokens, dim=0).long().to(self.device)
-        prompt_tokens_mask = torch.cat(tokens_mask, dim=0).bool().to(self.device)
+        prompt_tokens = torch.cat(tokens, dim=0)
+        prompt_tokens_mask = torch.cat(tokens_mask, dim=0)
 
         samples = []
         curr_tokens = prompt_tokens.unsqueeze(0)
         curr_tokens_mask = prompt_tokens_mask.unsqueeze(0)
-        curr_pos = torch.arange(0, prompt_tokens.size(0)).unsqueeze(0).long().to(self.device)
+        curr_pos = torch.arange(0, prompt_tokens.size(0), device=self.device).unsqueeze(0)
 
         max_seq_len = 2048
         max_context_len = max_seq_len - max_generation_len
@@ -147,10 +154,12 @@ class Generator:
                 break  # eos
 
             samples.append(sample)
-
-            curr_tokens = torch.cat([sample, torch.zeros(1, 1).long().to(self.device)], dim=1).unsqueeze(1)
+            zeros_tensor = torch.zeros(1, 1, device=self.device, dtype=torch.long)
+            ones_tensor = torch.ones_like(sample, device=self.device, dtype=torch.bool)
+            zeros_mask_tensor = torch.zeros(1, 1, device=self.device, dtype=torch.bool)
+            curr_tokens = torch.cat([sample, zeros_tensor], dim=1).unsqueeze(1)
             curr_tokens_mask = torch.cat(
-                [torch.ones_like(sample).bool(), torch.zeros(1, 1).bool().to(self.device)], dim=1
+                [ones_tensor, zeros_mask_tensor], dim=1
             ).unsqueeze(1)
             curr_pos = curr_pos[:, -1:] + 1
 
